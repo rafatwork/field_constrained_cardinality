@@ -1,0 +1,126 @@
+<?php
+
+/**
+ * @file
+ * Provides field cardinality configuration on field instance level.
+ */
+
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Field\FieldStorageDefinitionInterface;
+use Drupal\field\FieldConfigInterface;
+use Drupal\Core\Entity\EntityTypeInterface;
+
+/**
+ * Implements hook_form_FORM_ID_alter() for 'field_config_edit_form'.
+ */
+function field_constrained_cardinality_form_field_config_edit_form_alter(array &$form, FormStateInterface $form_state) {
+  /* @var \Drupal\field\FieldConfigInterface $field */
+  $field = $form_state->getFormObject()->getEntity();
+
+  // We are not compatible with field types that enforce a specific cardinality.
+  // @see \Drupal\field_ui\Form::getCardinalityForm()
+  // @see \Drupal\field_ui\Form::getEnforcedCardinality()
+  /* @var \Drupal\Core\Field\FieldTypePluginManager $field_type_manager */
+  $field_type_manager = \Drupal::service('plugin.manager.field.field_type');
+  $definition = $field_type_manager->getDefinition($field->getType());
+  if (!empty($definition['cardinality'])) {
+    return;
+  }
+
+  $form['third_party_settings']['field_constrained_cardinality'] = [
+    '#type' => 'details',
+    '#title' => t('Constrained cardinality'),
+    '#open' => TRUE,
+    '#tree' => TRUE,
+  ];
+
+  $form['third_party_settings']['field_constrained_cardinality']['constrained_cardinality'] = [
+    '#parents' => [],
+    '#type' => 'fieldset',
+    '#title' => t('Allowed number of values'),
+    '#attributes' => [
+      'class' => [
+        'container-inline',
+        'fieldgroup',
+        'form-composite',
+      ],
+    ],
+  ];
+
+  $storage_cardinality = $field->getFieldStorageDefinition()->getCardinality();
+  $constrained_cardinality = $field->getThirdPartySetting('field_constrained_cardinality', 'constrained_cardinality', $storage_cardinality);
+
+  $form['third_party_settings']['field_constrained_cardinality']['constrained_cardinality']['constrained_cardinality_type'] = [
+    '#type' => 'select',
+    '#title' => t('Allowed number of values'),
+    '#title_display' => 'invisible',
+    '#options' => [
+      'number' => t('Limited'),
+      FieldStorageDefinitionInterface::CARDINALITY_UNLIMITED => t('Unlimited'),
+    ],
+    '#default_value' => ($constrained_cardinality == FieldStorageDefinitionInterface::CARDINALITY_UNLIMITED) ? FieldStorageDefinitionInterface::CARDINALITY_UNLIMITED : 'number',
+  ];
+
+  $form['third_party_settings']['field_constrained_cardinality']['constrained_cardinality']['constrained_cardinality_number'] = [
+    '#type' => 'number',
+    '#default_value' => $constrained_cardinality != FieldStorageDefinitionInterface::CARDINALITY_UNLIMITED ? $constrained_cardinality : 1,
+    // TODO: Change to the highest delta in use for this instance.
+    '#min' => 1,
+    '#max' => $storage_cardinality != FieldStorageDefinitionInterface::CARDINALITY_UNLIMITED ? $storage_cardinality : NULL,
+    '#title' => t('Limit'),
+    '#title_display' => 'invisible',
+    '#size' => 2,
+    '#states' => [
+      'visible' => [
+        ':input[name="constrained_cardinality_type"]' => ['value' => 'number'],
+      ],
+      'disabled' => [
+        ':input[name="constrained_cardinality_type"]' => ['value' => FieldStorageDefinitionInterface::CARDINALITY_UNLIMITED],
+      ],
+    ],
+  ];
+
+  $form['#entity_builders'][] = 'field_constrained_cardinality_entity_builder';
+}
+
+/**
+ * Adds the constrained cardinality setting to the field config entity.
+ */
+function field_constrained_cardinality_entity_builder($entity_type, FieldConfigInterface $entity, &$form, FormStateInterface $form_state) {
+  $storage_cardinality = $entity->getFieldStorageDefinition()->getCardinality();
+
+  $constrained_cardinality = $form_state->getValue('constrained_cardinality_type');
+  if ($constrained_cardinality === 'number') {
+    $constrained_cardinality = $form_state->getValue('constrained_cardinality_number');
+  }
+
+  if (is_numeric($constrained_cardinality) && $storage_cardinality != $constrained_cardinality) {
+    $entity->setThirdPartySetting('field_constrained_cardinality', 'constrained_cardinality', $constrained_cardinality);
+  }
+  else {
+    // If no instance cardinality is set, or it equals the storage cardinality,
+    // we bail out completely.
+    $entity->unsetThirdPartySetting('field_constrained_cardinality', 'constrained_cardinality');
+  }
+}
+
+/**
+ * Implements hook_entity_bundle_field_info_alter().
+ */
+function field_constrained_cardinality_entity_bundle_field_info_alter(&$fields, EntityTypeInterface $entity_type, $bundle) {
+  foreach ($fields as &$field) {
+    if ($field instanceof FieldConfigInterface) {
+      /* @var \Drupal\Core\Field\FieldConfigInterface $field */
+      $constrained_cardinality = $field->getThirdPartySetting('field_constrained_cardinality', 'constrained_cardinality', FALSE);
+      if ($constrained_cardinality !== FALSE) {
+        $field->addConstraint('Count', [
+          'max' => $constrained_cardinality,
+          'maxMessage' => t('%name: this field cannot hold more than @count values.', [
+            '%name' => $field->getLabel(),
+            '@count' => $constrained_cardinality,
+          ]),
+        ]);
+      }
+    }
+  }
+}

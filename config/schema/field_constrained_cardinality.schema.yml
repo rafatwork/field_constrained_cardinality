@@ -1,0 +1,5 @@
+# Schema for the Field Constrained Cardinality module.
+
+field.field.*.*.*.third_party.constrained_cardinality:
+  type: integer
+  label: 'Maximum number of values users can enter (on the field instance)'

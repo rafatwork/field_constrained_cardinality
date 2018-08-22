@@ -1,0 +1,8 @@
+name: Field Constrained Cardinality
+description: Allows field cardinality to be restricted in the field instance settings
+# TODO: Define package.
+type: module
+core: 8.x
+
+dependencies:
+  - field:field
